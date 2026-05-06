@@ -471,7 +471,7 @@ export default function LoginPage({
       const assertionResp = await startAuthentication({ optionsJSON: options });
       const result = await apiFetch("/api/passkeys/authenticate/verify", {
         method: "POST",
-        body: JSON.stringify({ response: assertionResp }),
+        body: JSON.stringify({ response: assertionResp, email: passkeyEmail }),
       });
       if (!result.verified) throw new Error("Passkey verification failed.");
       const { error: otpError } = await supabase.auth.verifyOtp({
