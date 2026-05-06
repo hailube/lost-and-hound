@@ -511,7 +511,9 @@ app.post("/api/auth/clear-device", requireAuth, async (req, res) => {
 
 const PASSKEY_RP_NAME = "Lost & Hound";
 const PASSKEY_RP_ID   = process.env.PASSKEY_RP_ID   || "localhost";
-const PASSKEY_ORIGIN  = process.env.PASSKEY_ORIGIN  || "http://localhost:5173";
+// Support comma-separated list of origins (e.g. www and non-www variants)
+const PASSKEY_ORIGINS = (process.env.PASSKEY_ORIGIN || "http://localhost:5173")
+  .split(",").map(o => o.trim()).filter(Boolean);
 
 // In-memory challenge store — challenge -> { userId/email, expiry }
 // TTL of 5 minutes per challenge.
@@ -569,7 +571,7 @@ app.post("/api/passkeys/register/verify", requireAuth, require2FA, async (req, r
     verification = await verifyRegistrationResponse({
       response,
       expectedChallenge,
-      expectedOrigin: PASSKEY_ORIGIN,
+      expectedOrigin: PASSKEY_ORIGINS,
       expectedRPID: PASSKEY_RP_ID,
       requireUserVerification: true,
     });
@@ -678,7 +680,7 @@ app.post("/api/passkeys/authenticate/verify", strictLimiter, async (req, res) =>
     verification = await verifyAuthenticationResponse({
       response,
       expectedChallenge,
-      expectedOrigin: PASSKEY_ORIGIN,
+      expectedOrigin: PASSKEY_ORIGINS,
       expectedRPID: PASSKEY_RP_ID,
       requireUserVerification: true,
       credential: {
