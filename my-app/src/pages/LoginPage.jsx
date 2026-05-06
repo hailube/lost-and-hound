@@ -4,6 +4,7 @@ import { Keyboard } from "@capacitor/keyboard";
 import { dismissKeyboardOnEnter } from "../utils/keyboard";
 import { BiometricAuth } from "@aparajita/capacitor-biometric-auth";
 import { Preferences } from "@capacitor/preferences";
+import { startAuthentication } from "@simplewebauthn/browser";
 import { useDemo } from "../contexts/DemoContext";
 import ConfettiCanvas from "../components/ConfettiCanvas";
 import { useNavigate } from "react-router-dom";
@@ -31,6 +32,7 @@ import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
 import AppleIcon from "@mui/icons-material/Apple";
 import PeopleAltOutlinedIcon from "@mui/icons-material/PeopleAltOutlined";
 import FaceIcon from "@mui/icons-material/Face";
+import FingerprintIcon from "@mui/icons-material/Fingerprint";
 import TermsModal from "../components/TermsModal";
 import LoginSupportModal from "../components/LoginSupportModal";
 import DemoModal from "../components/DemoModal";
@@ -166,6 +168,10 @@ export default function LoginPage({
   const [storedBiometricEmail, setStoredBiometricEmail] = useState(null);
   const [faceIdLoading, setFaceIdLoading] = useState(false);
   const [manualMode, setManualMode] = useState(false);
+
+  // Web passkey (Windows Hello / Touch ID) — only on non-native platform
+  const [passkeyEmail] = useState(() => !Capacitor.isNativePlatform() ? (localStorage.getItem("passkey_email") || null) : null);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
 
   useEffect(() => {
     if (!isNative) return;
@@ -451,6 +457,38 @@ export default function LoginPage({
       setStoredBiometricEmail(null);
     } finally {
       setFaceIdLoading(false);
+    }
+  };
+
+  const handlePasskeySignIn = async () => {
+    setPasskeyLoading(true);
+    setError("");
+    try {
+      const options = await apiFetch("/api/passkeys/authenticate/options", {
+        method: "POST",
+        body: JSON.stringify({ email: passkeyEmail }),
+      });
+      const assertionResp = await startAuthentication({ optionsJSON: options });
+      const result = await apiFetch("/api/passkeys/authenticate/verify", {
+        method: "POST",
+        body: JSON.stringify({ response: assertionResp }),
+      });
+      if (!result.verified) throw new Error("Passkey verification failed.");
+      const { error: otpError } = await supabase.auth.verifyOtp({
+        token_hash: result.hashedToken,
+        type: "magiclink",
+      });
+      if (otpError) throw otpError;
+      if (result.deviceToken) {
+        localStorage.setItem("device_token", result.deviceToken);
+      }
+      onLoginSuccess?.();
+    } catch (err) {
+      const msg = err?.message || "";
+      if (msg.toLowerCase().includes("cancel") || err?.name === "NotAllowedError") return;
+      setError("Passkey sign-in failed. Please sign in with your password.");
+    } finally {
+      setPasskeyLoading(false);
     }
   };
 
@@ -1191,6 +1229,11 @@ export default function LoginPage({
                       ...(manualMode && biometryAvailable && storedBiometricEmail
                         ? [{ label: "Use Face ID", icon: <FaceIcon sx={{ fontSize: 18 }} />, action: () => setManualMode(false) }]
                         : []),
+                      ...(passkeyEmail && !passkeyLoading
+                        ? [{ label: "Use Fingerprint", icon: <FingerprintIcon sx={{ fontSize: 18 }} />, action: handlePasskeySignIn }]
+                        : passkeyLoading
+                          ? [{ label: "Signing in…", icon: <CircularProgress size={14} />, action: () => {} }]
+                          : []),
                     ].map((item) => (
                       <Box
                         key={item.label}

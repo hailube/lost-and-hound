@@ -12,6 +12,7 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@simplewebauthn/server": "^13.3.0",
     "@supabase/supabase-js": "^2.99.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",

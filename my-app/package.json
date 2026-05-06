@@ -25,6 +25,7 @@
     "@googlemaps/js-api-loader": "^2.0.2",
     "@mui/icons-material": "^7.3.8",
     "@mui/material": "^7.3.8",
+    "@simplewebauthn/browser": "^13.3.0",
     "@supabase/supabase-js": "^2.99.1",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",

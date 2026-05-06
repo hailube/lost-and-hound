@@ -30,6 +30,7 @@ import {
 } from "./demo/mockData";
 import AppFooter from "./components/AppFooter";
 import ReferralPollModal from "./components/ReferralPollModal";
+import PasskeySetupModal from "./components/PasskeySetupModal";
 import { Capacitor } from "@capacitor/core";
 import { App as CapApp } from "@capacitor/app";
 import { dismissKeyboard } from "./utils/keyboard";
@@ -123,6 +124,17 @@ export default function App() {
       .catch(() => {})
       .finally(() => setReferralPending(false));
   }, [user?.id, !!profile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Show passkey setup prompt after first password login on web (once per device/user)
+  useEffect(() => {
+    if (!user || !profile || Capacitor.isNativePlatform() || !justLoggedIn.current) return;
+    if (localStorage.getItem(`passkey_prompted_${user.id}`)) return;
+    if (localStorage.getItem("passkey_email")) return; // already has a passkey
+    // Small delay so the login transition finishes before the modal appears
+    const t = setTimeout(() => setPasskeyModalOpen(true), 1500);
+    return () => clearTimeout(t);
+  }, [user?.id, !!profile]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const demoDisclaimerOpen = isDemoMode && !demoDismissed;
 
   useEffect(() => {
@@ -454,6 +466,7 @@ export default function App() {
   }, [profile, user]);
 
   const justLoggedIn = useRef(false);
+  const [passkeyModalOpen, setPasskeyModalOpen] = useState(false);
 
   const onLoginSuccess = useCallback(() => {
     justLoggedIn.current = true;
@@ -957,6 +970,14 @@ export default function App() {
         open={demoDisclaimerOpen}
         onClose={() => setDemoDismissed(true)}
         isDark={effectiveTheme === "dark"}
+      />
+
+      <PasskeySetupModal
+        open={passkeyModalOpen}
+        isDark={effectiveTheme === "dark"}
+        userId={user?.id}
+        userEmail={user?.email}
+        onDone={() => setPasskeyModalOpen(false)}
       />
 
       {isDemoMode && location.pathname === "/" && (

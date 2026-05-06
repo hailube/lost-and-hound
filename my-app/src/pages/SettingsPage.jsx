@@ -1,7 +1,8 @@
 // --- SettingsPage: User account settings UI ---
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
+import { startRegistration } from "@simplewebauthn/browser";
 import { BiometricAuth } from "@aparajita/capacitor-biometric-auth";
 import { Preferences } from "@capacitor/preferences";
 import { supabase } from "../../backend/supabaseClient";
@@ -45,6 +46,7 @@ import BlockIcon from "@mui/icons-material/Block";
 import LocationOnOutlinedIcon from "@mui/icons-material/LocationOnOutlined";
 import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 import NotificationsOutlinedIcon from "@mui/icons-material/NotificationsOutlined";
+import FingerprintIcon from "@mui/icons-material/Fingerprint";
 import { CAMPUSES } from "../constants/campuses";
 import { TIME_ZONE_OPTIONS } from "../utils/timezone";
 
@@ -163,6 +165,61 @@ export default function SettingsPage({
     localStorage.removeItem("biometric_email");
     await Preferences.remove({ key: "__bio_credential" });
     setFaceIdEnabled(false);
+  };
+
+  // Web passkeys — only shown on non-native platform
+  const isWeb = !Capacitor.isNativePlatform();
+  const [passkeys, setPasskeys] = useState([]);
+  const [passkeysLoading, setPasskeysLoading] = useState(false);
+  const [passkeyAdding, setPasskeyAdding] = useState(false);
+  const [passkeyMessage, setPasskeyMessage] = useState("");
+
+  const fetchPasskeys = useCallback(async () => {
+    if (!isWeb || isDemoMode || !effectiveUser) return;
+    setPasskeysLoading(true);
+    try {
+      const data = await apiFetch("/api/passkeys");
+      setPasskeys(data?.passkeys ?? []);
+    } catch {
+      // silently ignore — passkeys table may not exist yet
+    } finally {
+      setPasskeysLoading(false);
+    }
+  }, [isWeb, isDemoMode, effectiveUser]);
+
+  useEffect(() => { fetchPasskeys(); }, [fetchPasskeys]);
+
+  const handleAddPasskey = async () => {
+    setPasskeyAdding(true);
+    setPasskeyMessage("");
+    try {
+      const options = await apiFetch("/api/passkeys/register/options", { method: "POST" });
+      const attResp = await startRegistration({ optionsJSON: options });
+      await apiFetch("/api/passkeys/register/verify", {
+        method: "POST",
+        body: JSON.stringify({ response: attResp }),
+      });
+      localStorage.setItem("passkey_email", effectiveUser?.email || "");
+      setPasskeyMessage("Passkey added! You can now sign in with your fingerprint.");
+      await fetchPasskeys();
+    } catch (err) {
+      if (err?.name !== "NotAllowedError") {
+        setPasskeyMessage(err?.message || "Failed to add passkey.");
+      }
+    } finally {
+      setPasskeyAdding(false);
+    }
+  };
+
+  const handleDeletePasskey = async (id) => {
+    try {
+      await apiFetch(`/api/passkeys/${id}`, { method: "DELETE" });
+      const remaining = passkeys.filter((p) => p.id !== id);
+      setPasskeys(remaining);
+      if (remaining.length === 0) localStorage.removeItem("passkey_email");
+    } catch {
+      setPasskeyMessage("Failed to remove passkey.");
+    }
   };
 
   const handleSaveNotif = async (key, value) => {
@@ -616,6 +673,91 @@ export default function SettingsPage({
                       labelPlacement="start"
                       sx={{ justifyContent: "space-between", ml: 0, width: "100%" }}
                     />
+                  </Box>
+                )}
+
+                {/* -- Web Passkeys (Windows Hello / Touch ID) -- */}
+                {isWeb && !isDemoMode && (
+                  <Box
+                    sx={{
+                      bgcolor: BRAND.maroonFaint,
+                      borderRadius: 2,
+                      px: 2,
+                      py: 1.5,
+                      mt: 2,
+                    }}
+                  >
+                    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: passkeys.length > 0 ? 1 : 0 }}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <FingerprintIcon sx={{ fontSize: 20, color: BRAND.maroon }} />
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 600, color: BRAND.textPrimary }}>Fingerprint Sign-in</Typography>
+                          <Typography variant="caption" sx={{ color: BRAND.textSecondary }}>
+                            Sign in with Windows Hello or Touch ID
+                          </Typography>
+                        </Box>
+                      </Box>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        onClick={handleAddPasskey}
+                        disabled={passkeyAdding || passkeysLoading}
+                        sx={{
+                          background: BRAND.maroon,
+                          "&:hover": { background: BRAND.maroonDark },
+                          fontWeight: 700,
+                          borderRadius: 1.5,
+                          textTransform: "none",
+                          fontSize: 12,
+                          px: 1.5,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {passkeyAdding ? <CircularProgress size={12} color="inherit" /> : "Add"}
+                      </Button>
+                    </Box>
+
+                    {passkeysLoading && (
+                      <Box sx={{ display: "flex", justifyContent: "center", py: 1 }}>
+                        <CircularProgress size={16} sx={{ color: BRAND.maroon }} />
+                      </Box>
+                    )}
+
+                    {passkeys.map((pk) => (
+                      <Box
+                        key={pk.id}
+                        sx={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          py: 0.75,
+                          borderTop: `1px solid ${BRAND.cardBorder}`,
+                        }}
+                      >
+                        <Box>
+                          <Typography variant="caption" sx={{ fontWeight: 600, color: BRAND.textPrimary, display: "block" }}>
+                            {pk.device_name}
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: BRAND.textSecondary }}>
+                            Added {new Date(pk.created_at).toLocaleDateString()}
+                            {pk.last_used_at ? ` · Last used ${new Date(pk.last_used_at).toLocaleDateString()}` : ""}
+                          </Typography>
+                        </Box>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleDeletePasskey(pk.id)}
+                          sx={{ color: BRAND.textSecondary, "&:hover": { color: "error.main" } }}
+                        >
+                          <DeleteOutlineIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </Box>
+                    ))}
+
+                    {passkeyMessage && (
+                      <Typography variant="caption" sx={{ display: "block", mt: 1, color: passkeyMessage.startsWith("Failed") ? "error.main" : (isDark ? "#4caf50" : "#2e7d32"), fontWeight: 600 }}>
+                        {passkeyMessage}
+                      </Typography>
+                    )}
                   </Box>
                 )}
 
